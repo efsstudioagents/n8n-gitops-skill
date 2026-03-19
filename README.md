@@ -97,7 +97,9 @@ agentes/nome-funcao_example/
   escopo_example.md
   esquema_example.md
   changelog_example.md
-  prompt/v1.0_example.md
+  prompt/
+    v1.0_example.md
+    changelog.md
 workflows/
 ```
 
@@ -174,9 +176,10 @@ n8n-{cliente}/           → OPS (acesso do time)
     nome-funcao/
       escopo.md          → O que o agente faz e não faz
       esquema.md         → Queries e estrutura de dados
-      changelog.md       → Histórico de versões
+      changelog.md       → Histórico geral do agente (escopo, esquema, regras)
       prompt/
         v1.0.md          → Prompt versionado
+        changelog.md     → Histórico de versões do prompt
   context/               → Contexto da empresa
     companhia.md
     produtos.md
