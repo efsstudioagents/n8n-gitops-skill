@@ -1,0 +1,20 @@
+{
+  "name": "n8n-gitops",
+  "version": "1.0.0",
+  "description": "GitOps para n8n: backup incremental de workflows no GitHub e estrutura de repos OPS/ADM por cliente",
+  "author": {
+    "name": "EFS Studio",
+    "url": "https://efsstudio.com.br"
+  },
+  "license": "MIT",
+  "keywords": [
+    "n8n",
+    "gitops",
+    "github",
+    "backup",
+    "workflow",
+    "automation",
+    "devops"
+  ],
+  "repository": "https://github.com/efsstudioagents/n8n-gitops-skill"
+}

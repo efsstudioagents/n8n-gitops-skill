@@ -1,0 +1,529 @@
+{
+  "name": "n8n Backup GitOps",
+  "nodes": [
+    {
+      "parameters": {
+        "content": "## n8n Backup GitOps\n\nBackup incremental de workflows n8n no GitHub.\nSalva apenas os workflows que foram modificados desde o último backup (compara `versionId`).\n\n**Como configurar:**\n1. `1. Listar Workflows` e `6. Export Completo` → preencha a URL da instância n8n e a API Key\n2. `3. Buscar GitHub`, `8b` e `8c` → conecte sua credencial GitHub e ajuste a URL do repo\n3. `10. Notificar` → conecte sua credencial Evolution API (ou remova o nó)\n\n**Pastas:** primeira tag do workflow = pasta no GitHub. Sem tag → `Uncategorized/`\n\n---\nCriado por [@erick.fonsec](https://www.instagram.com/erick.fonsec/) · [EFS Studio](https://efsstudio.com.br) · MIT License",
+        "height": 280,
+        "width": 420,
+        "color": 7
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [
+        -1440,
+        -240
+      ],
+      "id": "sticky-credits",
+      "name": "Créditos"
+    },
+    {
+      "parameters": {
+        "rule": {
+          "interval": [
+            {
+              "field": "weeks",
+              "triggerAtDay": [
+                5
+              ],
+              "triggerAtHour": 3
+            }
+          ]
+        }
+      },
+      "type": "n8n-nodes-base.scheduleTrigger",
+      "typeVersion": 1.2,
+      "position": [
+        -1440,
+        64
+      ],
+      "id": "f8d8b0a6-7f62-41a0-affe-cd02e4460f16",
+      "name": "Toda Sexta 3h"
+    },
+    {
+      "parameters": {
+        "url": "https://n8n.SEUDOMINIO.COM/api/v1/workflows",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-KEY",
+              "value": "SUA_CHAVE_API"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -1200,
+        64
+      ],
+      "id": "578a6178-8ca9-4a40-851c-23f3ae934550",
+      "name": "1. Listar Workflows"
+    },
+    {
+      "parameters": {
+        "jsCode": "const response = $('1. Listar Workflows').first().json;\nconst workflows = response.data || response;\n\nfunction slugify(text) {\n  const map = {'á':'a','à':'a','ã':'a','â':'a','é':'e','ê':'e','í':'i',\n               'ó':'o','ô':'o','õ':'o','ú':'u','ü':'u','ç':'c'};\n  let slug = text.toLowerCase();\n  for (const [k, v] of Object.entries(map)) slug = slug.split(k).join(v);\n  slug = slug.replace(/[^a-z0-9]+/g, '-').replace(/-+/g, '-').replace(/^-|-$/g, '');\n  return slug.substring(0, 60);\n}\n\n// ─── Pasta = primeira tag do workflow ────────────────────────\n// Toda tag vira pasta automaticamente.\n// Múltiplas tags → primeira tag é a pasta principal\n// Sem tag alguma → Uncategorized\nfunction getFolder(tags) {\n  if (tags.length === 0) return 'Uncategorized';\n  return tags[0];\n}\n\nconst items = workflows.map(w => {\n  const tags = (w.tags || []).map(t => typeof t === 'string' ? t : t.name || '');\n  const folder = getFolder(tags);\n  const slug = slugify(w.name);\n  const filename = slug + '.json';\n  const githubPath = 'workflows/' + folder + '/' + filename;\n  return {\n    json: {\n      workflowId: w.id,\n      workflowName: w.name,\n      versionId: w.versionId,\n      tags,\n      folder,\n      filename,\n      githubPath\n    }\n  };\n});\n\nreturn items;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -960,
+        64
+      ],
+      "id": "4af127a2-211a-4ac6-99e0-0c2df6baad4e",
+      "name": "2. Split + Organizar"
+    },
+    {
+      "parameters": {
+        "url": "=https://api.github.com/repos/SEU_USUARIO/SEU_REPOSITORIO/contents/{{ $json.githubPath }}",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "githubApi",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        -720,
+        64
+      ],
+      "id": "dd1e1f84-7683-483b-9a2c-3ee2954e61fd",
+      "name": "3. Buscar GitHub",
+      "credentials": {
+        "githubApi": {
+          "id": "",
+          "name": "GitHub API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "jsCode": "const splitItems = $('2. Split + Organizar').all();\nconst ghItems = $('3. Buscar GitHub').all();\n\nconst results = [];\nfor (let i = 0; i < splitItems.length; i++) {\n  const original = splitItems[i].json;\n  const ghData = ghItems[i] ? ghItems[i].json : {};\n\n  let savedVersionId = '';\n  let fileSha = '';\n\n  const rawContent = ghData.content || '';\n  const rawSha     = ghData.sha     || '';\n\n  if (rawSha) fileSha = rawSha;\n\n  if (rawContent) {\n    try {\n      const cleaned  = rawContent.replace(/\\n/g, '');\n      const decoded  = Buffer.from(cleaned, 'base64').toString('utf-8');\n      const parsed   = JSON.parse(decoded);\n      savedVersionId = parsed.versionId || '';\n    } catch(e) {}\n  }\n\n  const hasChanges = original.versionId !== savedVersionId;\n\n  results.push({\n    json: { ...original, savedVersionId, fileSha, hasChanges }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -480,
+        64
+      ],
+      "id": "41600a2f-3094-4db2-82cb-c25bed8607ab",
+      "name": "4. Comparar versionId"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "chg",
+              "leftValue": "={{ $json.hasChanges }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        -240,
+        64
+      ],
+      "id": "6ff07916-c064-46db-8f8f-932f8759f606",
+      "name": "5. Mudou?"
+    },
+    {
+      "parameters": {
+        "url": "=https://n8n.SEUDOMINIO.COM/api/v1/workflows/{{ $json.workflowId }}",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "X-N8N-API-KEY",
+              "value": "SUA_CHAVE_API"
+            }
+          ]
+        },
+        "options": {
+          "response": {
+            "response": {
+              "responseFormat": "json"
+            }
+          }
+        }
+      },
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [
+        0,
+        0
+      ],
+      "id": "c9930639-587b-4448-9613-b30a3b8be105",
+      "name": "6. Export Completo"
+    },
+    {
+      "parameters": {
+        "jsCode": "const ifItems     = $('5. Mudou?').all();\nconst exportItems = $('6. Export Completo').all();\n\nconst results = [];\nfor (let i = 0; i < ifItems.length; i++) {\n  const orig       = ifItems[i].json;\n  const fullExport = exportItems[i] ? exportItems[i].json : {};\n\n  delete fullExport.id;\n  delete fullExport.createdAt;\n  delete fullExport.updatedAt;\n  delete fullExport.pinData;\n  delete fullExport.executionData;\n  delete fullExport.triggerTime;\n  delete fullExport.owner;\n  delete fullExport.shared;\n  delete fullExport.meta;\n\n  // versionId permanece — usado para comparação incremental no próximo backup\n\n  const content       = JSON.stringify(fullExport, null, 2);\n  const commitMessage = 'backup: ' + orig.workflowName + ' (v:' + (orig.versionId || '').substring(0, 8) + ')';\n\n  results.push({\n    json: {\n      workflowId:   orig.workflowId,\n      workflowName: orig.workflowName,\n      githubPath:   orig.githubPath,\n      content,\n      commitMessage,\n      fileSha: orig.fileSha || ''\n    }\n  });\n}\n\nreturn results;"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        240,
+        0
+      ],
+      "id": "191b5c91-1268-469d-ab9f-67074d6b57e4",
+      "name": "7. Montar JSON"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        0,
+        192
+      ],
+      "id": "9d5f8d70-68a4-48b9-b10b-3b4363056cd4",
+      "name": "Sem Alteracoes"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 1
+          },
+          "conditions": [
+            {
+              "id": "cond-sha-exists",
+              "leftValue": "={{ $json.fileSha }}",
+              "rightValue": "",
+              "operator": {
+                "type": "string",
+                "operation": "notEmpty",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [
+        480,
+        0
+      ],
+      "id": "cd709a0b-50e7-4534-83d2-28eb13112af9",
+      "name": "8a. Arquivo Existe?"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "operation": "edit",
+        "owner": {
+          "__rl": true,
+          "value": "",
+          "mode": "url"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "=",
+          "mode": "url"
+        },
+        "filePath": "={{ $json.githubPath }}",
+        "fileContent": "={{ $json.content }}",
+        "commitMessage": "={{ $json.commitMessage }}",
+        "additionalParameters": {
+          "branch": {}
+        }
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        720,
+        -80
+      ],
+      "id": "ae1f1714-41f6-4a8d-92c1-3b864082b087",
+      "name": "8b. Editar GitHub",
+      "credentials": {
+        "githubApi": {
+          "id": "",
+          "name": "GitHub API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {
+        "resource": "file",
+        "owner": {
+          "__rl": true,
+          "value": "=",
+          "mode": "url"
+        },
+        "repository": {
+          "__rl": true,
+          "value": "=",
+          "mode": "url"
+        },
+        "filePath": "={{ $json.githubPath }}",
+        "fileContent": "={{ $json.content }}",
+        "commitMessage": "={{ $json.commitMessage }}",
+        "additionalParameters": {
+          "branch": {}
+        }
+      },
+      "type": "n8n-nodes-base.github",
+      "typeVersion": 1,
+      "position": [
+        720,
+        80
+      ],
+      "id": "ba0258eb-4bd1-4fff-a877-71537f0adcc1",
+      "name": "8c. Criar GitHub",
+      "alwaysOutputData": true,
+      "credentials": {
+        "githubApi": {
+          "id": "",
+          "name": "GitHub API"
+        }
+      },
+      "onError": "continueRegularOutput"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3,
+      "position": [
+        960,
+        0
+      ],
+      "id": "34ae085e-d87a-461f-8514-59a9d27e97fb",
+      "name": "8d. Merge Push"
+    },
+    {
+      "parameters": {
+        "jsCode": "const montar      = $('7. Montar JSON').all();\nconst pushResults = $input.all();\n\nconst success = [];\nconst errors  = [];\n\nfor (let i = 0; i < pushResults.length; i++) {\n  const p    = pushResults[i].json;\n  const name = p.workflowName || (montar[i] ? montar[i].json.workflowName : 'Workflow #' + (i + 1));\n\n  if (p.commit || (p.content && typeof p.content === 'object' && p.content.sha)) {\n    success.push(name);\n  } else {\n    errors.push(name);\n  }\n}\n\nconst now = new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo' });\nlet text  = `✅ *Backup n8n concluído!*\\n\\n🕐 ${now}\\n\\n`;\n\nif (success.length > 0) {\n  text += `📦 *${success.length} workflow(s) atualizado(s):*\\n`;\n  text += success.map(n => '• ' + n).join('\\n');\n} else {\n  text += 'Nenhum workflow foi alterado.';\n}\n\nif (errors.length > 0) {\n  text += `\\n\\n⚠️ *${errors.length} erro(s) no push:*\\n`;\n  text += errors.map(n => '• ' + n).join('\\n');\n}\n\nreturn [{ json: { success: success.length, errors: errors.length, text } }];"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        0
+      ],
+      "id": "cb69e880-5672-4b97-af26-3f0eada08b0a",
+      "name": "9. Contar Atualizados"
+    },
+    {
+      "parameters": {
+        "resource": "messages-api",
+        "messageText": "={{ $json.text }}",
+        "options_message": {}
+      },
+      "type": "n8n-nodes-evolution-api.evolutionApi",
+      "typeVersion": 1,
+      "position": [
+        1440,
+        0
+      ],
+      "id": "b9c396a2-4429-4f13-9180-17b67a5f223e",
+      "name": "10. Notificar (WhatsApp)",
+      "credentials": {
+        "evolutionApi": {
+          "id": "",
+          "name": "Evolution API"
+        }
+      }
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Toda Sexta 3h": {
+      "main": [
+        [
+          {
+            "node": "1. Listar Workflows",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "1. Listar Workflows": {
+      "main": [
+        [
+          {
+            "node": "2. Split + Organizar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "2. Split + Organizar": {
+      "main": [
+        [
+          {
+            "node": "3. Buscar GitHub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "3. Buscar GitHub": {
+      "main": [
+        [
+          {
+            "node": "4. Comparar versionId",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "4. Comparar versionId": {
+      "main": [
+        [
+          {
+            "node": "5. Mudou?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "5. Mudou?": {
+      "main": [
+        [
+          {
+            "node": "6. Export Completo",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Sem Alteracoes",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "6. Export Completo": {
+      "main": [
+        [
+          {
+            "node": "7. Montar JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "7. Montar JSON": {
+      "main": [
+        [
+          {
+            "node": "8a. Arquivo Existe?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8a. Arquivo Existe?": {
+      "main": [
+        [
+          {
+            "node": "8b. Editar GitHub",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "8c. Criar GitHub",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8b. Editar GitHub": {
+      "main": [
+        [
+          {
+            "node": "8d. Merge Push",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "8c. Criar GitHub": {
+      "main": [
+        [
+          {
+            "node": "8d. Merge Push",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "8d. Merge Push": {
+      "main": [
+        [
+          {
+            "node": "9. Contar Atualizados",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "9. Contar Atualizados": {
+      "main": [
+        [
+          {
+            "node": "10. Notificar (WhatsApp)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "binaryMode": "separate",
+    "callerPolicy": "workflowsFromSameOwner"
+  },
+  "tags": []
+}
